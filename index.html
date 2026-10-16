@@ -1,12 +1,11 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
-<head>
+<html lang="pt-BR"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Múmias do CS</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,600;0,700;1,700;1,800&family=Barlow:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,600;0,700;1,700;1,800&amp;family=Barlow:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
 <style>
 :root{
   --bg:#131318;
@@ -294,7 +293,7 @@ footer{border-top:1px solid var(--line);padding-top:16px;color:var(--text-3);fon
   </div>
   <div class="fotoAcoes">
     <label class="btn" for="fotoInput">Adicionar fotos</label>
-    <input type="file" id="fotoInput" accept="image/*" multiple>
+    <input type="file" id="fotoInput" accept="image/*" multiple="">
   </div>
 </section>
 
@@ -362,7 +361,7 @@ footer{border-top:1px solid var(--line);padding-top:16px;color:var(--text-3);fon
           <option value="n">Nº de partidas</option>
         </select>
       </label>
-      <label class="chk"><input type="checkbox" id="soStack5" checked> Somente stack de 5</label>
+      <label class="chk"><input type="checkbox" id="soStack5" checked=""> Somente stack de 5</label>
     </div>
     <p class="note" id="legendaFp"></p>
     <div class="tablewrap"><table id="tabLines"></table></div>
@@ -514,8 +513,8 @@ footer{border-top:1px solid var(--line);padding-top:16px;color:var(--text-3);fon
 </div>
 </div>
 
-<div class="eggbox" id="eggbox" hidden>
-  <button class="eggfechar" id="eggfechar" aria-label="Fechar">&times;</button>
+<div class="eggbox" id="eggbox" hidden="">
+  <button class="eggfechar" id="eggfechar" aria-label="Fechar">×</button>
   <figure class="eggfig">
     <img id="eggimg" alt="" src="">
     <figcaption id="eggcap"></figcaption>
@@ -2003,47 +2002,4 @@ document.addEventListener('click',e=>{
 
 /* ====================== inicializacao ====================== */
 carregarEmbutido();
-</script>
-<script>
-/* Galeria: adicionar fotos (fica separado da lógica do relatório). */
-(function(){
-  var KEY='mumias-fotos-extra';
-  var grade=document.querySelector('.galeria');
-  var input=document.getElementById('fotoInput');
-  if(!grade||!input) return;
-  function monta(src){
-    var f=document.createElement('figure');
-    var img=document.createElement('img');
-    img.src=src; img.alt='Foto do grupo';
-    f.appendChild(img); grade.appendChild(f);
-  }
-  var salvas=[];
-  try{ salvas=JSON.parse(localStorage.getItem(KEY)||'[]'); }catch(e){}
-  salvas.forEach(monta);
-  function salvar(){
-    try{ localStorage.setItem(KEY,JSON.stringify(salvas)); }
-    catch(e){ alert('Sem espaço para guardar mais fotos no navegador — elas ficam visíveis só nesta sessão.'); }
-  }
-  input.addEventListener('change',function(){
-    Array.prototype.forEach.call(input.files,function(file){
-      var fr=new FileReader();
-      fr.onload=function(){
-        var im=new Image();
-        im.onload=function(){
-          var MAX=1400, esc=Math.min(1,MAX/Math.max(im.width,im.height));
-          var c=document.createElement('canvas');
-          c.width=Math.round(im.width*esc); c.height=Math.round(im.height*esc);
-          c.getContext('2d').drawImage(im,0,0,c.width,c.height);
-          var data=c.toDataURL('image/jpeg',0.82);
-          salvas.push(data); monta(data); salvar();
-        };
-        im.src=fr.result;
-      };
-      fr.readAsDataURL(file);
-    });
-    input.value='';
-  });
-})();
-</script>
-</body>
-</html>
+</script></body></html>
