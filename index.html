@@ -217,6 +217,23 @@ input[type=checkbox]{accent-color:var(--accent)}
 #tabAcumulado .det{display:block;font-family:"IBM Plex Mono",monospace;
   font-size:9.5px;color:var(--text-3);margin-top:1px;letter-spacing:.02em}
 
+.consulta{border:1px solid var(--line);border-left:4px solid var(--accent);
+  background:var(--panel);padding:16px 18px;margin:18px 0 26px}
+.consultaTopo{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:4px}
+.consulta .picker{margin:10px 0 0}
+.consulta .chip{padding:7px 13px;font-size:11.5px}
+#baseConsulta{margin-top:14px}
+#baseConsulta .kpis{margin-top:4px}
+#baseConsulta .vazio{padding:10px 0;text-align:left}
+.consultaNota{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--text-3);
+  margin-top:10px;line-height:1.6}
+.bpKpis{grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-top:4px}
+.bpKpis .kpi b{font-size:26px}
+.bpTit{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--text-3);font-weight:500;margin:24px 0 10px;
+  border-bottom:1px solid var(--line);padding-bottom:6px}
+table.bpMapas td:first-child{text-transform:capitalize}
+#pickBP{margin:4px 0 16px}
 #baseCards{grid-template-columns:repeat(3,1fr);margin:18px 0 22px}
 @media(max-width:860px){#baseCards{grid-template-columns:1fr}}
 #baseCards .card h3 small{display:block;text-transform:none;letter-spacing:0;
@@ -323,10 +340,17 @@ footer{border-top:1px solid var(--line);padding-top:16px;color:var(--text-3);fon
       <label>Período
         <select id="recDias">
           <option value="0">sem limite</option>
+          <option value="7">últimos 7 dias</option>
+          <option value="15">últimos 15 dias</option>
           <option value="30">últimos 30 dias</option>
-          <option value="90">últimos 90 dias</option>
+          <option value="45">últimos 45 dias</option>
+          <option value="60">últimos 2 meses</option>
+          <option value="90">últimos 3 meses</option>
+          <option value="120">últimos 4 meses</option>
           <option value="180">últimos 6 meses</option>
+          <option value="270">últimos 9 meses</option>
           <option value="365">último ano</option>
+          <option value="730">últimos 2 anos</option>
         </select>
       </label>
     </span>
@@ -493,8 +517,44 @@ footer{border-top:1px solid var(--line);padding-top:16px;color:var(--text-3);fon
         </select>
       </label>
     </div>
+    <div id="baseAvisoModelo"></div>
     <div class="verdict" id="baseCards"></div>
     <div class="tablewrap"><table id="tabBases"></table></div>
+  </section>
+
+  <section>
+    <h2>Base personalizada</h2>
+    <p class="note">Escolha os jogadores e o período: o resultado é o aproveitamento deles
+      juntos, sem modelo nenhum por trás — só partidas, vitórias e derrotas, contadas.
+      O período aqui é independente do filtro no topo da página.</p>
+
+    <div class="controls">
+      <label>Período
+        <select id="bpDias">
+          <option value="7">últimos 7 dias</option>
+          <option value="15">últimos 15 dias</option>
+          <option value="30" selected="">últimos 30 dias</option>
+          <option value="45">últimos 45 dias</option>
+          <option value="60">últimos 2 meses</option>
+          <option value="90">últimos 3 meses</option>
+          <option value="180">últimos 6 meses</option>
+          <option value="365">último ano</option>
+          <option value="0">todo o histórico</option>
+        </select>
+      </label>
+      <label>Partidas
+        <select id="bpEscopo">
+          <option value="5">só stack de 5</option>
+          <option value="4">4 ou mais do grupo</option>
+          <option value="3">3 ou mais do grupo</option>
+        </select>
+      </label>
+      <button id="bpLimpar">Limpar seleção</button>
+      <span id="bpAviso" class="names"></span>
+    </div>
+
+    <div class="picker" id="pickBP"></div>
+    <div id="bpResultado"></div>
   </section>
 
   <section>
@@ -810,6 +870,8 @@ function render(){
   renderPlayers();
   renderModelo();
   renderBases();
+  montaPickBP();
+  renderBP();
   renderDuplas();
   renderMapas();
 
@@ -1727,11 +1789,15 @@ function ajustarComPares(jogos){
   // pre-computa, por partida, quais pesos estao ativos
   const ativos=[], y=new Float64Array(jogos.length);
   for(let g=0; g<jogos.length; g++){
-    const idx=jogos[g].ids.map(id=>IDX[id]).sort((a,b)=>a-b);
-    const a=[];
-    for(const i of idx) a.push(i);
-    for(let x=0;x<idx.length;x++) for(let z=x+1;z<idx.length;z++)
-      a.push(parIdx.get(idx[x]+'|'+idx[z]));
+    // dedup defensivo: um id repetido geraria um par inexistente no indice,
+    // e um unico undefined contamina todos os gradientes com NaN
+    const idx=[...new Set(jogos[g].ids.map(id=>IDX[id]))]
+      .filter(Number.isInteger).sort((a,b)=>a-b);
+    const a=[...idx];
+    for(let x=0;x<idx.length;x++) for(let z=x+1;z<idx.length;z++){
+      const pi=parIdx.get(idx[x]+'|'+idx[z]);
+      if(pi!==undefined) a.push(pi);
+    }
     ativos.push(a);
     y[g]=jogos[g].venceu;
   }
@@ -1739,20 +1805,24 @@ function ajustarComPares(jogos){
   const w=new Float64Array(D);
   let b=0;
   const N=jogos.length||1;
+  // amostra pequena com separacao quase perfeita faz o expoente estourar e os
+  // pesos viram NaN; o teto no z mantem a sigmoide em faixa numerica segura
+  const sigmo=(z)=>1/(1+Math.exp(-Math.max(-30,Math.min(30,z))));
   // calibrados injetando sinergias conhecidas e medindo a recuperacao:
   // com estes valores o par sinergico sai em 1o e o anti-sinergico em ultimo,
   // mantendo baixo o ruido nos pares sem efeito real
   const lamI=1.5, lamP=6;
-  const lr=0.35;
+  const lr0=0.3;
 
-  for(let it=0; it<1200; it++){
+  for(let it=0; it<1500; it++){
+    const lr=lr0/(1+it/600);          // passo decrescente: converge sem oscilar
     const gw=new Float64Array(D);
     let gb=0;
     for(let g=0; g<N; g++){
       const a=ativos[g];
       let z=b;
       for(let t=0;t<a.length;t++) z+=w[a[t]];
-      const e=1/(1+Math.exp(-z))-y[g];
+      const e=sigmo(z)-y[g];
       for(let t=0;t<a.length;t++) gw[a[t]]+=e;
       gb+=e;
     }
@@ -1762,7 +1832,11 @@ function ajustarComPares(jogos){
     }
     b-=lr*(gb/N);
   }
-  return {w,b,P,D,parIdx};
+  for(let k=0;k<D;k++) if(!Number.isFinite(w[k])){
+    console.warn('modelo de pares nao convergiu; sinergia desativada neste recorte');
+    return null;
+  }
+  return Number.isFinite(b) ? {w,b,P,D,parIdx} : null;
 }
 
 /** Probabilidade prevista para um conjunto de 5, com ou sem os termos de par. */
@@ -1778,13 +1852,22 @@ function preverPar(M, idsNum, comPares=true){
   return 1/(1+Math.exp(-z));
 }
 
+/**
+ * O modelo de sinergia estima 45 parametros (9 jogadores + 36 duplas). Abaixo
+ * de algumas partidas por parametro ele passa a decorar a amostra em vez de
+ * medir efeito, e devolveria numeros convincentes sem conteudo. Em recortes
+ * curtos a sinergia e desligada e ficam de pe apenas as medidas diretas —
+ * winrate, Wilson e saldo de rounds —, que nao dependem de modelo.
+ */
+const MIN_PARA_SINERGIA=60;
+
 function calcBases(){
   const minStack=+($('#baseEscopo')?.value||5);
   const jogos=JOGOS.filter(g=>g.stack>=minStack);
   if(!jogos.length) return [];
 
   // 1) acumula cada base e guarda em quais partidas ela esteve inteira
-  MODELO_PAR=ajustarComPares(jogos);
+  MODELO_PAR = jogos.length>=MIN_PARA_SINERGIA ? ajustarComPares(jogos) : null;
 
   const mapa=new Map();
   for(let gi=0; gi<jogos.length; gi++){
@@ -1814,6 +1897,13 @@ function calcBases(){
   // conta — mais partidas deixam a estimativa mais precisa, nao maior.
   const M=MODELO_PAR;
   for(const B of mapa.values()){
+    B.wr=B.v/B.n;
+    B.wilson=wilson(B.v,B.n);
+    B.diff=B.nSaldo? B.saldo/B.nSaldo : null;
+    if(!M){                                   // sem modelo, so as medidas diretas
+      B.esperado=null; B.sinergia=null; B.sinLog=null; B.odds=null;
+      B.ganho=null; B.se=null; B.z=0; delete B.idx; continue;
+    }
     const dentro=new Set(B.ids.map(id=>IDX[id]));
     let somaCom=0, somaSem=0;
     for(const gi of B.idx){
@@ -1846,12 +1936,9 @@ function calcBases(){
     B.sinLog=sl;
     B.odds=Math.exp(sl);                    // quantas vezes as chances mudam
     B.sinergia=B.ganho;                     // compatibilidade com o resto da tela
-    B.wr=B.v/B.n;
     const p=B.wr;
     B.se=Math.sqrt(Math.max(p*(1-p),0.01)/B.n)*100;
     B.z=B.se? B.ganho/B.se : 0;
-    B.wilson=wilson(B.v,B.n);
-    B.diff=B.nSaldo? B.saldo/B.nSaldo : null;
     delete B.idx;
   }
 
@@ -1895,6 +1982,120 @@ function selo(B){
     + `${forte?'forte':'moder.'}</span>`;
 }
 
+
+
+/* ====================== base personalizada ====================== */
+/**
+ * Contagem direta, sem modelo: pega as partidas em que todos os escolhidos
+ * estavam em quadra dentro do periodo e soma vitorias e derrotas. Usa o
+ * ACERVO inteiro, nao o recorte do topo da pagina, porque esta secao tem o
+ * proprio controle de periodo.
+ */
+let SEL_BP=new Set();
+
+function partidasDaBP(ids){
+  const dias=+($('#bpDias')?.value||0);
+  const minStack=+($('#bpEscopo')?.value||5);
+  const corte=dias? Date.now()-dias*86400000 : 0;
+  return ACERVO.filter(g=>
+    g.stack>=minStack &&
+    (!dias || (g.data||0)>=corte) &&
+    ids.every(id=>g.ids.includes(id)));
+}
+
+function montaPickBP(){
+  const sig=GRUPO.map(p=>p.player_id).join('|');
+  const el=$('#pickBP');
+  if(el.dataset.sig!==sig){
+    el.dataset.sig=sig;
+    SEL_BP.clear();
+    el.innerHTML=GRUPO.map(p=>
+      `<button class="chip" data-id="${p.player_id}" aria-pressed="false">${p.nickname}</button>`).join('');
+  }
+  if(el.dataset.lig) return;
+  el.dataset.lig='1';
+  el.addEventListener('click',e=>{
+    const b=e.target.closest('.chip'); if(!b||b.disabled) return;
+    const id=b.dataset.id;
+    if(SEL_BP.has(id)) SEL_BP.delete(id); else if(SEL_BP.size<5) SEL_BP.add(id);
+    renderBP();
+  });
+  $('#bpLimpar').onclick=()=>{ SEL_BP.clear(); renderBP(); };
+  $('#bpDias').addEventListener('change',renderBP);
+  $('#bpEscopo').addEventListener('change',renderBP);
+}
+
+function renderBP(){
+  for(const b of $('#pickBP').children){
+    const on=SEL_BP.has(b.dataset.id);
+    b.setAttribute('aria-pressed',on);
+    b.disabled = !on && SEL_BP.size>=5;
+  }
+  const box=$('#bpResultado');
+  const ids=[...SEL_BP].sort((a,b)=>IDX[a]-IDX[b]);
+  const rotuloPeriodo=$('#bpDias').selectedOptions[0].textContent.trim();
+
+  if(ids.length<2){
+    $('#bpAviso').textContent=`${ids.length} de 5 — escolha ao menos 2`;
+    box.innerHTML='<p class="vazio">Marque de 2 a 5 jogadores para ver o aproveitamento '
+      +'deles juntos no período escolhido.</p>';
+    return;
+  }
+  $('#bpAviso').textContent='';
+
+  const js_=partidasDaBP(ids);
+  if(!js_.length){
+    box.innerHTML=`<p class="vazio">${nomes(ids)} não jogaram juntos nos ${rotuloPeriodo
+      .replace('últimos ','').replace('último ','')}. Amplie o período ou solte o filtro de partidas.</p>`;
+    return;
+  }
+
+  const n=js_.length;
+  const v=js_.filter(g=>g.venceu).length;
+  const comSaldo=js_.filter(g=>g.saldo!=null);
+  const saldo=comSaldo.length? comSaldo.reduce((a,g)=>a+g.saldo,0)/comSaldo.length : null;
+
+  // por mapa
+  const mp=new Map();
+  for(const g of js_){
+    const o=mp.get(g.mapa)||{n:0,v:0,s:0,ns:0};
+    o.n++; o.v+=g.venceu;
+    if(g.saldo!=null){ o.s+=g.saldo; o.ns++; }
+    mp.set(g.mapa,o);
+  }
+  const mapas=[...mp.entries()].sort((a,b)=>b[1].n-a[1].n);
+  const maxN=Math.max(...mapas.map(([,o])=>o.n),1);
+
+  const linhasMapa=mapas.map(([nome,o])=>{
+    const wr=o.v/o.n;
+    return `<tr>
+      <td>${nome.replace(/^de_/,'')}</td>
+      <td class="num">${o.n}</td>
+      <td class="num">${o.v}–${o.n-o.v}</td>
+      <td class="num ${wr>=.5?'up':'down'}">${pct(wr)}</td>
+      <td><span class="bar ${wr>=.5?'pos':''}"><i style="width:${(o.n/maxN*100).toFixed(0)}%"></i></span></td>
+      <td class="num">${o.ns? sgn(o.s/o.ns) : '—'}</td>
+    </tr>`;
+  }).join('');
+
+  const primeira=js_[js_.length-1].data, ultima=js_[0].data;
+  const fmt=(t)=>t? new Date(t).toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',year:'2-digit'}) : '—';
+
+  box.innerHTML=`
+    <div class="kpis bpKpis">
+      <div class="kpi"><b>${n}</b><span>partidas juntos</span></div>
+      <div class="kpi"><b>${v}</b><span>vitórias</span></div>
+      <div class="kpi"><b>${n-v}</b><span>derrotas</span></div>
+      <div class="kpi ${v/n>=.5?'up':'down'}"><b>${pct(v/n)}</b><span>aproveitamento</span></div>
+      <div class="kpi ${(saldo??0)>=0?'up':'down'}"><b>${saldo==null?'—':sgn(saldo)}</b><span>saldo de rounds</span></div>
+    </div>
+    <p class="consultaNota">${nomes(ids)} · ${rotuloPeriodo} · de ${fmt(primeira)} a ${fmt(ultima)}</p>
+    <h4 class="bpTit">Por mapa</h4>
+    <div class="tablewrap"><table class="bpMapas"><thead><tr>
+      <th>Mapa</th><th>Jogos</th><th>V–D</th><th>Aproveitamento</th><th></th><th>Saldo/jogo</th>
+    </tr></thead><tbody>${linhasMapa}</tbody></table></div>`;
+}
+
 function renderBases(){
   const kSel=+($('#baseK')?.value||0);
   const minN=Math.max(2,+($('#baseMin')?.value||10));
@@ -1902,6 +2103,15 @@ function renderBases(){
 
   const todas=calcBases();
   const elegiveis=todas.filter(B=>B.n>=minN);
+
+  $('#baseAvisoModelo').innerHTML = MODELO_PAR===null
+    ? '<div class="warn">Recorte curto demais para separar sinergia de acaso: a coluna '
+      + 'de sinergia e o “esperado” ficam desligados, e o que aparece é o desempenho '
+      + 'direto — winrate, Wilson e saldo de rounds —, que não depende de modelo. '
+      + 'Para a sinergia voltar, escolha um período que reúna ao menos '
+      + MIN_PARA_SINERGIA + ' partidas.</div>'
+    : '';
+
 
   // --- cards: a melhor base de cada tamanho, pelo criterio escolhido ---
   const cards=[2,3,4].map(k=>{
@@ -1961,8 +2171,14 @@ function renderBases(){
       <th title="quanto as chances de vitoria mudam por esses jogadores atuarem juntos, alem do que cada um rende">Sinergia</th>
       <th title="o quanto esta base multiplica a sinergia da melhor sub-base dentro dela; proximo de x1,0 significa que o jogador a mais nao acrescentou nada">Incremento</th>
       <th>Saldo/jogo</th>
-    </tr></thead><tbody>${linhas ||
-      `<tr><td colspan="11" class="vazio">Nenhuma base com ${minN}+ partidas nesse recorte.</td></tr>`}</tbody>`;
+    </tr></thead><tbody>${linhas || (()=>{
+      const teto=Math.max(0,...todas.filter(B=>!kSel||B.k===kSel).map(B=>B.n));
+      return `<tr><td colspan="11" class="vazio">Nenhuma base com ${minN}+ partidas nesse recorte.`
+        + (teto? ` A base mais frequente aqui tem <strong>${teto}</strong> partidas — `
+                 + `baixe o mínimo para esse valor ou amplie o período no topo.`
+               : ' Amplie o período no topo da página.')
+        + `</td></tr>`;
+    })()}</tbody>`;
 }
 
 /* ====================== easter egg ====================== */
