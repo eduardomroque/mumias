@@ -276,6 +276,21 @@ input[type=checkbox]{accent-color:var(--accent)}
 #visaoDemos .note h4{margin:0;font-size:1rem}
 #visaoDemos .note p{font-size:.9rem;color:var(--text-3)}
 #visaoDemos .tablebox{overflow-x:auto;border:1px solid var(--line);background:var(--panel);border-radius:6px}
+#visaoDemos .duas{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin:14px 0}
+#visaoDemos .barcel{width:92px;padding-right:0}
+#visaoDemos .bar{display:block;height:9px;border-radius:5px;min-width:3px}
+#visaoDemos td.num{text-align:right;font-variant-numeric:tabular-nums}
+#visaoDemos th.num{text-align:right}
+#visaoDemos td.bom{color:var(--win);font-weight:600}
+#visaoDemos td.ruim{color:var(--loss);font-weight:600}
+#visaoDemos td.dim{color:var(--text-3)}
+#visaoDemos td.destaque{color:var(--accent);font-weight:600}
+#visaoDemos .sub b.bom{color:var(--win)}
+#visaoDemos .sub b.ruim{color:var(--loss)}
+#visaoDemos h4{margin:18px 0 8px;font-size:.95rem;color:var(--text-2)}
+#visaoDemos p.hint{font-size:.82rem;color:var(--text-3);margin-top:8px;line-height:1.5}
+#visaoDemos p.sub{color:var(--text-2);line-height:1.6;margin:6px 0 0}
+@media (max-width:860px){#visaoDemos .duas{grid-template-columns:1fr}}
 #visaoDemos table{border-collapse:collapse;width:100%;font-size:.86rem}
 #visaoDemos th, #visaoDemos td{padding:8px 9px;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 #visaoDemos th{font-family:"IBM Plex Mono",monospace;font-weight:500;font-size:.68rem;letter-spacing:.05em;text-transform:uppercase;color:var(--text-3);border-bottom:1px solid var(--line);vertical-align:bottom}
@@ -807,6 +822,7 @@ footer{border-top:1px solid var(--line);padding-top:16px;color:var(--text-3);fon
     <button class="aba" data-tela="consolidado" aria-pressed="true">Consolidado</button>
     <button class="aba" data-tela="partidas" aria-pressed="false">Partidas</button>
     <button class="aba" data-tela="mapas" aria-pressed="false">Mapas e regiões</button>
+    <button class="aba" data-tela="sodemos" aria-pressed="false">Só nas demos</button>
   </nav>
 
   <div id="rxTela"></div>
@@ -2667,6 +2683,244 @@ const RaioX = (function(){
   }
 
   /* ---------- MAPAS E REGIÕES ---------- */
+  /* ---------- SÓ NAS DEMOS ----------
+     Indicadores que a Data API da FACEIT nao entrega em nenhum endpoint:
+     dependem do que acontece dentro do round, nao do resultado dele. */
+
+  /** O `plant_site` e o id da entidade do bombsite, que muda a cada demo.
+      Dentro de uma partida ele e estavel e so existem dois, entao da para
+      descobrir qual e A e qual e B pelos lugares onde as kills aconteceram
+      naqueles rounds — e escolher a atribuicao que concorda mais com eles. */
+  let _sitesCache = null;
+  function sitesDaPartida(){
+    if (_sitesCache) return _sitesCache;
+    const ix = Object.fromEntries(H.eventCols.map((c,i)=>[c,i]));
+    const porM = {};
+    for (const e of H.events){
+      const m = e[ix.m]; (porM[m] || (porM[m] = {}));
+      const r = e[ix.round]; (porM[m][r] || (porM[m][r] = [])).push(e);
+    }
+    const out = {};
+    for (const m of ALL){
+      const tal = {};
+      for (const r of m.rounds){
+        if (!r.plant) continue;
+        const sid = r.plant_site; if (sid == null) continue;
+        tal[sid] || (tal[sid] = {A:0,B:0});
+        for (const e of ((porM[m.id]||{})[r.n] || [])){
+          for (const campo of ['killerPlace','victimPlace']){
+            const p = e[ix[campo]] || '';
+            if (p.indexOf('Bombsite') === 0) tal[sid][p.slice(-1)]++;
+          }
+        }
+      }
+      const ids = Object.keys(tal).filter(s=>tal[s].A + tal[s].B > 0);
+      const mapa = {};
+      if (ids.length === 2){
+        const [a,b] = ids;
+        mapa[a] = (tal[a].A + tal[b].B) >= (tal[a].B + tal[b].A) ? 'A' : 'B';
+        mapa[b] = mapa[a] === 'A' ? 'B' : 'A';
+      } else if (ids.length === 1){
+        mapa[ids[0]] = tal[ids[0]].A >= tal[ids[0]].B ? 'A' : 'B';
+      }
+      out[m.id] = mapa;
+    }
+    return (_sitesCache = out);
+  }
+
+  const CAT_ARMA = (()=>{ const c={};
+    'ak47 m4a1 m4a1_silencer galilar famas sg556 aug'.split(' ').forEach(w=>c[w]='rifle');
+    'awp ssg08 scar20 g3sg1'.split(' ').forEach(w=>c[w]='sniper');
+    'mp9 mac10 ump45 p90 mp7 mp5sd bizon'.split(' ').forEach(w=>c[w]='smg');
+    'glock usp_silencer hkp2000 p250 tec9 fiveseven deagle revolver elite cz75a'
+      .split(' ').forEach(w=>c[w]='pistola');
+    return c; })();
+
+  /** Tabela de escada: uma linha por faixa, com barra proporcional. */
+  function escada(linhas, rotulo){
+    // A barra mostra a TAXA, nao o volume: volume ja esta na coluna "rounds", e
+    // barra por volume com cor por taxa se le errado (barra maior parece melhor).
+    return `<table><thead><tr><th>${rotulo}</th><th>rounds</th><th>ganhos</th>
+      <th class="num">taxa</th><th></th></tr></thead><tbody>${linhas.map(l=>{
+        const t = l.total ? Math.round(100*l.ganhos/l.total) : 0;
+        const fraco = l.total < 10;
+        return `<tr><td><b>${l.chave}</b></td><td>${l.total}</td><td>${l.ganhos}</td>
+          <td class="num ${t>=55?'bom':t<=35?'ruim':''}">${t}%${fraco?'<span class="dim" title="amostra pequena"> *</span>':''}</td>
+          <td class="barcel"><span class="bar" style="width:${Math.max(t,2)}%;
+            background:${t>=55?'var(--win)':t<=35?'var(--loss)':'var(--line-2)'}"></span></td>
+        </tr>`;}).join('')}</tbody></table>`;
+  }
+
+  function viewSoDemos(){
+    const ms = filtered();
+    if (!ms.length) return `<div class="empty">Nenhuma partida neste mapa.</div>`;
+    const ids = new Set(ms.map(m=>m.id));
+    const ix = Object.fromEntries(H.eventCols.map((c,i)=>[c,i]));
+    const ev = H.events.filter(e=>ids.has(e[ix.m]));
+    const rounds = ms.flatMap(m=>m.rounds.map(r=>({...r, _m:m})));
+    const sites = sitesDaPartida();
+
+    /* ---- a bomba ---- */
+    const plantT = rounds.filter(r=>r.side==='T' && r.plant);
+    const plantCT = rounds.filter(r=>r.side==='CT' && r.plant);
+    const convT = plantT.filter(r=>r.won).length;
+    const convCT = plantCT.filter(r=>r.won).length;
+    const defNosso = rounds.filter(r=>r.side==='CT' && r.reason==='bomb_defused' && r.won).length;
+    const defDeles = plantT.filter(r=>r.reason==='bomb_defused').length;
+    const explodiu = plantT.filter(r=>r.reason==='bomb_exploded').length;
+
+    const faixa = (lista, campo) => {
+      const d = {};
+      for (const r of lista){
+        const v = r[campo]; if (v == null) continue;
+        const k = Math.min(Math.max(0, v|0), 5);
+        (d[k] || (d[k] = {chave:'', total:0, ganhos:0}));
+        d[k].total++; d[k].ganhos += r.won ? 1 : 0;
+      }
+      return Object.keys(d).sort((a,b)=>a-b).map(k=>({
+        ...d[k], chave: k + (k==='1' ? ' vivo' : ' vivos')}));
+    };
+
+    // site por mapa, so onde a amostra sustenta
+    const porSite = {};
+    for (const r of plantT){
+      const s = (sites[r._m.id] || {})[r.plant_site]; if (!s) continue;
+      const k = r._m.map + '|' + s;
+      (porSite[k] || (porSite[k] = {total:0, ganhos:0}));
+      porSite[k].total++; porSite[k].ganhos += r.won ? 1 : 0;
+    }
+    const mapasSite = [...new Set(Object.keys(porSite).map(k=>k.split('|')[0]))]
+      .map(mp=>({mp, A:porSite[mp+'|A'], B:porSite[mp+'|B']}))
+      .filter(x=>(x.A?x.A.total:0)+(x.B?x.B.total:0) >= 12)
+      .sort((a,b)=>((b.A?b.A.total:0)+(b.B?b.B.total:0))-((a.A?a.A.total:0)+(a.B?a.B.total:0)));
+
+    const cel = o => o && o.total
+      ? (()=>{const t=Math.round(100*o.ganhos/o.total);
+          return `<td>${o.total}</td><td class="num ${t>=55?'bom':t<=35?'ruim':''}">${t}%</td>`;})()
+      : `<td class="dim">–</td><td class="dim">–</td>`;
+
+    /* ---- economia ---- */
+    const COMPRAS = ['full','force','eco'];
+    const mat = {};
+    for (const r of rounds){
+      const k = r.m_buy + '|' + r.o_buy; if (!r.m_buy || !r.o_buy) continue;
+      (mat[k] || (mat[k] = {total:0, ganhos:0}));
+      mat[k].total++; mat[k].ganhos += r.won ? 1 : 0;
+    }
+    const justo = mat['full|full'];
+
+    /* ---- quem decide o round ---- */
+    const primeira = {};
+    for (const e of ev){
+      const k = e[ix.m] + '|' + e[ix.round];
+      if (!(k in primeira)) primeira[k] = e;
+    }
+    const venceu = {};
+    for (const r of rounds) venceu[r._m.id + '|' + r.n] = r.won;
+    const fb = {nossa:{total:0,ganhos:0}, deles:{total:0,ganhos:0}};
+    for (const k in primeira){
+      const e = primeira[k], w = venceu[k];
+      if (w == null) continue;
+      const lado = e[ix.killerGroup] === 1 ? 'nossa' : e[ix.killerGroup] === 0 ? 'deles' : null;
+      if (!lado) continue;
+      fb[lado].total++; fb[lado].ganhos += w ? 1 : 0;
+    }
+
+    // por jogador: AWP e kills contra eco
+    const buy = {};
+    for (const r of rounds) buy[r._m.id + '|' + r.n] = r.o_buy;
+    const pj = {};
+    for (const e of ev){
+      if (e[ix.killerGroup] !== 1) continue;
+      const n = e[ix.killer]; if (!n) continue;
+      (pj[n] || (pj[n] = {n, k:0, awp:0, eco:0, full:0, pist:0}));
+      pj[n].k++;
+      if (e[ix.weapon] === 'awp') pj[n].awp++;
+      if (CAT_ARMA[e[ix.weapon]] === 'pistola') pj[n].pist++;
+      const b = buy[e[ix.m] + '|' + e[ix.round]];
+      if (b === 'eco') pj[n].eco++; else if (b === 'full') pj[n].full++;
+    }
+    const jog = Object.values(pj).filter(p=>p.k >= 40).sort((a,b)=>b.k-a.k);
+
+    const pc = (a,b)=> b ? (100*a/b).toFixed(0)+'%' : '–';
+
+    return `
+    <section>
+      <div class="eyebrow">Só nas demos${state.map==='all'?'':' · '+mapName(state.map)}</div>
+      <h2>O que a API não conta</h2>
+      <p class="sub">Nada aqui sai da Data API da FACEIT: ela entrega o placar e as
+        estatísticas do jogador, não o que aconteceu dentro do round. Estes números
+        vêm da demo — ${ms.length} partidas, ${rounds.length} rounds,
+        ${ev.length.toLocaleString('pt-BR')} kills.</p>
+    </section>
+
+    <section>
+      <div class="eyebrow">A bomba</div>
+      <h3>Plantar é metade do round</h3>
+      <div class="kpis">
+        ${kpi('Plants no TR', plantT.length, pc(convT,plantT.length)+' convertidos')}
+        ${kpi('Eles plantaram', plantCT.length, pc(convCT,plantCT.length)+' retomados')}
+        ${kpi('Desarmes nossos', defNosso, 'rounds de CT fechados no defuse')}
+        ${kpi('Nossas desarmadas', defDeles, explodiu+' explodiram')}
+      </div>
+      <div class="duas">
+        <div><h4>Pós-plant no TR, por quantos sobraram vivos</h4>
+          ${escada(faixa(plantT,'plant_t_alive'),'TRs vivos no plant')}</div>
+        <div><h4>Retake no CT, por quantos sobraram vivos</h4>
+          ${escada(faixa(plantCT,'plant_ct_alive'),'CTs vivos no plant')}</div>
+      </div>
+      ${mapasSite.length ? `<h4>Onde o grupo planta, e onde converte</h4>
+      <table><thead><tr><th>mapa</th><th>plants A</th><th class="num">converte</th>
+        <th>plants B</th><th class="num">converte</th><th>preferência</th></tr></thead>
+        <tbody>${mapasSite.map(x=>{
+          const a=x.A?x.A.total:0, b=x.B?x.B.total:0;
+          const pref = a+b ? (a>b ? `A (${pc(a,a+b)})` : `B (${pc(b,a+b)})`) : '–';
+          return `<tr><td><b>${mapName(x.mp)}</b></td>${cel(x.A)}${cel(x.B)}
+            <td class="dim">${pref}</td></tr>`;}).join('')}</tbody></table>
+      <p class="hint">O asterisco marca faixa com menos de 10 rounds — a taxa
+        ali oscila muito. Qual bombsite é A e qual é B não vem escrito na demo: o arquivo
+        guarda o id da entidade, que muda a cada partida. O site foi deduzido pelos
+        lugares onde as kills daquele round aconteceram.</p>` : ''}
+    </section>
+
+    <section>
+      <div class="eyebrow">Economia</div>
+      <h3>Quem compra o quê, e quem ganha</h3>
+      <table><thead><tr><th>nossa compra</th>${COMPRAS.map(o=>`<th colspan="2">eles em ${o}</th>`).join('')}</tr>
+        <tr><th></th>${COMPRAS.map(()=>'<th>rounds</th><th class="num">vitória</th>').join('')}</tr></thead>
+        <tbody>${COMPRAS.map(mb=>`<tr><td><b>${mb}</b></td>${COMPRAS.map(ob=>{
+          const o = mat[mb+'|'+ob];
+          if (!o || !o.total) return `<td class="dim">–</td><td class="dim">–</td>`;
+          const t = Math.round(100*o.ganhos/o.total);
+          return `<td>${o.total}</td><td class="num ${t>=55?'bom':t<=35?'ruim':''}">${t}%</td>`;
+        }).join('')}</tr>`).join('')}</tbody></table>
+      ${justo && justo.total ? `<p class="sub">O duelo justo é <b>full contra full</b>:
+        ${justo.total} rounds, ${justo.ganhos} ganhos
+        (<b class="${100*justo.ganhos/justo.total>=50?'bom':'ruim'}">${pc(justo.ganhos,justo.total)}</b>).
+        É o número que diz como o grupo joga quando a economia não explica nada.</p>` : ''}
+    </section>
+
+    <section>
+      <div class="eyebrow">Quem decide o round</div>
+      <h3>A primeira kill e o que cada um faz com a arma</h3>
+      <div class="kpis">
+        ${kpi('Abrimos o round', fb.nossa.total, pc(fb.nossa.ganhos,fb.nossa.total)+' viram vitória')}
+        ${kpi('Eles abriram', fb.deles.total, pc(fb.deles.ganhos,fb.deles.total)+' ainda ganhamos')}
+      </div>
+      <table><thead><tr><th>jogador</th><th>kills</th><th>AWP</th>
+        <th class="num">% com AWP</th><th>pistola</th><th>contra eco</th>
+        <th class="num">% contra eco</th></tr></thead>
+        <tbody>${jog.map(p=>`<tr><td><b>${p.n}</b></td><td>${p.k}</td><td>${p.awp}</td>
+          <td class="num ${p.awp/p.k>=0.12?'destaque':''}">${pc(p.awp,p.k)}</td>
+          <td>${p.pist}</td><td>${p.eco}</td>
+          <td class="num ${p.eco/p.k>=0.22?'ruim':''}">${pc(p.eco,p.k)}</td></tr>`).join('')}
+        </tbody></table>
+      <p class="hint">"Contra eco" conta as kills feitas em rounds em que o time
+        adversário estava de eco. Uma fatia alta não desmerece o jogador, mas dilui o
+        número total dele — é por isso que a coluna existe.</p>
+    </section>`;
+  }
+
   function viewMapas(){
     const maps=MAPS.slice().sort((a,b)=>ALL.filter(m=>m.map===b).length-ALL.filter(m=>m.map===a).length);
     if(!state.regMap||!maps.includes(state.regMap)) state.regMap=(state.map!=='all'?state.map:maps[0]);
@@ -2734,6 +2988,7 @@ const RaioX = (function(){
     tela.innerHTML = matchAberta ? viewMatch(matchAberta)
       : abaAtual==='partidas' ? viewPartidas()
       : abaAtual==='mapas'    ? viewMapas()
+      : abaAtual==='sodemos'  ? viewSoDemos()
       : viewConsolidado();
   }
 
